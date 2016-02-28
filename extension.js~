@@ -1,0 +1,155 @@
+/*
+ * This file is part of Bumblebee Indicator Gnome Shell Extension.
+ *
+ * Bumblebee Indicator Gnome Shell Extension is free software; you can
+ * redistribute it and/or modify it under the terms of the GNU General
+ * Public License as published by the Free Software Foundation; either
+ * version 3 of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+ * MA 02110-1301, USA.
+ *
+ * Author: Alessio Gaeta <alga777@gmail.com>
+ * Maintainer: Gregor Majcen <majcn.m@gmail.com>
+ *
+ */
+
+const Gio = imports.gi.Gio;
+const St = imports.gi.St;
+const Main = imports.ui.main;
+const Shell = imports.gi.Shell;
+const GLib = imports.gi.GLib;
+const Util = imports.misc.util;
+
+const Lang = imports.lang;
+
+const ExtensionUtils = imports.misc.extensionUtils;
+const Local = ExtensionUtils.getCurrentExtension();
+/* const Convenience = Local.imports.convenience; */
+
+function ExtensionController(extensionMeta) {
+    return {
+        extension: new BumblebeeIndicator(extensionMeta),
+
+        enable: function() {
+            this.extension.enable();
+        },
+
+        disable: function() {
+            this.extension.disable();
+        }
+    }
+}
+
+function _showPopup(stext) {
+	text = new St.Label({ style_class: 'gpu-label', text: 'bla' });
+    Main.uiGroup.add_actor(text);
+
+    text.opacity = 255;
+
+    let monitor = Main.layoutManager.primaryMonitor;
+
+    text.set_position(Math.floor(monitor.width / 2 - text.width / 2),
+                      Math.floor(monitor.height / 2 - text.height / 2));
+
+    Tweener.addTween(text,
+                     { opacity: 0,
+                       time: 2,
+                       transition: 'easeOutQuad',
+                       onComplete: _hidePopup });
+}
+
+function BumblebeeIndicator(extensionMeta) {
+    this._init(extensionMeta);
+}
+
+BumblebeeIndicator.prototype = {
+    _init: function(extensionMeta) {
+        // let config = new Convenience.Config();
+
+        let activeIcon = this._getIcon(extensionMeta.path + '/images/bumblebee-indicator-active.svg');
+        let unactiveIcon  = this._getIcon(extensionMeta.path + '/images/bumblebee-indicator.svg');
+        this._icons = [unactiveIcon, activeIcon];
+
+        let lockFile = '/dev/nvidiactl';
+        this._lockMonitor = Gio.File.new_for_path(lockFile);
+        this._lock = this._lockMonitor.monitor_file(Gio.FileMonitorFlags.NONE, null);
+
+        this.button = new St.Bin({ style_class: 'panel-button',
+                          reactive: true,
+                          can_focus: true,
+                          x_fill: true,
+                          y_fill: true,
+                          track_hover: true });
+        this.button.set_child(this._icons[0]);
+
+		this.button.connect('button-press-event', this._callScript);
+		
+        if (this._lockMonitor.query_exists(null)){
+        	this._setButtonIcon(true);
+        }
+    },
+
+	_callScript: function(lockfile){
+		GLib.spawn_command_line_sync( "optirun_off" );
+		// GLib.spawn_command_line_sync( "gnome-terminal -e 'sh -c  \"optirun_off;\" '" );
+		// Util.spawnCommandLine("gnome-terminal -e 'sh -c  \"optirun_off;\" '" );
+		return 0;
+
+		// let serror='';
+		// let bok=true;
+		// let bbstatus = Shell.get_file_contents_utf8_sync('/proc/acpi/bbswitch').trim();
+		// let non = bbstatus.indexOf('ON');
+		// if (non > 0){
+			// GLib.spawn_command_line_sync( 'gnome-terminal', null, null, bok, serror);
+		// 	this._setButtonIcon(true);
+		// }
+		// else{
+			// GLib.spawn_command_line_sync( 'gnome-terminal --tab --tab', null, null, bok, serror);
+		// 	this._setButtonIcon(false);
+		// }
+
+		return 0;
+	},
+
+    _getIcon: function(path) {
+        let gicon = Gio.Icon.new_for_string(path);
+        return new St.Icon({ gicon: gicon,
+                             style_class: 'system-status-icon' });
+    },
+
+    _statusChanged: function(monitor, a_file, other_file, event_type) {
+		//_showPopup(event_type);
+        if (event_type == Gio.FileMonitorEvent.CREATED) {
+            this._setButtonIcon(true);
+        } else if (event_type ==  Gio.FileMonitorEvent.DELETED) {
+            this._setButtonIcon(false);
+        }
+    },
+
+    _setButtonIcon: function(active) {
+        let iconIndex = active ? 1 : 0;
+        this.button.set_child(this._icons[iconIndex]);
+    },
+
+    enable: function() {
+        this._lock.id = this._lock.connect('changed', Lang.bind(this, this._statusChanged));
+        Main.panel._rightBox.insert_child_at_index(this.button, 0);
+    },
+
+    disable: function() {
+        this._lock.disconnect(this._lock.id);
+        Main.panel._rightBox.remove_child(this.button);
+    }
+}
+
+function init(extensionMeta) {
+    return new ExtensionController(extensionMeta);
+}
